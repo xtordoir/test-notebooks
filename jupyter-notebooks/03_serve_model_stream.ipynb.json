@@ -1,0 +1,393 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Predict on data stream"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "// import \"org.apache.spark %% spark-sql-kafka-0-10 % 2.4.0\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val spark = sparkSession\n",
+    "val dataDir = System.getenv(\"HOME\") + \"/data\""
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Load the saved model"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import org.apache.spark.ml.{Pipeline, PipelineModel}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val model = PipelineModel.load(s\"$dataDir/spark-linear-model\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Create a structured stream from kafka `test` topic"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val rawData = spark\n",
+    "  .readStream\n",
+    "  .format(\"kafka\")\n",
+    "  .option(\"kafka.bootstrap.servers\", \"192.168.58.111:9092\")\n",
+    "  .option(\"subscribe\", \"test\")\n",
+    "  .option(\"startingOffsets\", \"earliest\")\n",
+    "  .load()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rawData.isStreaming"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rawData.printSchema()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### case class to deserialize json messages to"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "case class Trade(exchange: String, pair: String, timestamp: Long, price: Double, volume: Double)\n",
+    "\n",
+    "import org.apache.spark.sql.Encoders\n",
+    "val schema = Encoders.product[Trade].schema"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Kafka messages are\n",
+    "\n",
+    "* cast as `String`\n",
+    "* json is parsed\n",
+    "* and decoded as `Trade` objects"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val rawValues = rawData.selectExpr(\"CAST(value AS STRING)\").as[String]\n",
+    "val jsonValues = rawValues.select(from_json($\"value\", schema) as \"record\")\n",
+    "val tradeData = jsonValues.select(\"record.*\").as[Trade]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Inspect the content of the stream with an in-memory output"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val visualizationQuery = tradeData.writeStream\n",
+    "  .queryName(\"visualization\")    // this query name will be the SQL table name\n",
+    "  .outputMode(\"append\")\n",
+    "  .format(\"memory\")\n",
+    "  .start()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val sampleDataset = sparkSession.sql(\"select * from visualization\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Count the amount of data processed\n",
+    "\n",
+    "Use the dataframe api..."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Count the number of records entries per `pair`"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### What is the latest `timestamp` for each `pair`?\n",
+    "\n",
+    "You may need to `collect` to display on notebook"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### define an aggregate function for latest price"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import org.apache.spark.sql.expressions.MutableAggregationBuffer\n",
+    "import org.apache.spark.sql.expressions.UserDefinedAggregateFunction\n",
+    "import org.apache.spark.sql.Row\n",
+    "import org.apache.spark.sql.types._\n",
+    "\n",
+    "class LastPrice extends UserDefinedAggregateFunction {\n",
+    "  // This is the input fields for your aggregate function.\n",
+    "  override def inputSchema: org.apache.spark.sql.types.StructType =\n",
+    "    StructType(StructField(\"timestamp\", LongType) :: StructField(\"price\", DoubleType) :: Nil)\n",
+    "\n",
+    "  // This is the internal fields you keep for computing your aggregate.\n",
+    "  override def bufferSchema: StructType = StructType(\n",
+    "    StructField(\"timestamp\", LongType) ::\n",
+    "    StructField(\"last\", DoubleType) :: Nil\n",
+    "  )\n",
+    "\n",
+    "  // This is the output type of your aggregatation function.\n",
+    "  override def dataType: DataType = DoubleType\n",
+    "\n",
+    "  override def deterministic: Boolean = true\n",
+    "\n",
+    "  // This is the initial value for your buffer schema.\n",
+    "  override def initialize(buffer: MutableAggregationBuffer): Unit = {\n",
+    "    buffer(0) = -1L\n",
+    "    buffer(1) = 0.0D\n",
+    "  }\n",
+    "\n",
+    "  // This is how to update your buffer schema given an input.\n",
+    "  override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {\n",
+    "    if ( buffer.getAs[Long](0) < input.getAs[Long](0)) {\n",
+    "      buffer(0) = input.getAs[Long](0)\n",
+    "      buffer(1) = input.getAs[Double](1)\n",
+    "    }\n",
+    "  }\n",
+    "\n",
+    "  // This is how to merge two objects with the bufferSchema type.\n",
+    "  override def merge(buffer1: MutableAggregationBuffer, buffer2: Row): Unit = {\n",
+    "    if ( buffer1.getAs[Long](0) < buffer2.getAs[Long](0)) {\n",
+    "      buffer1(0) = buffer2.getAs[Long](0)\n",
+    "      buffer1(1) = buffer2.getAs[Double](1)\n",
+    "    }\n",
+    "  }\n",
+    "\n",
+    "  // This is where you output the final value, given the final value of your bufferSchema.\n",
+    "  override def evaluate(buffer: Row): Any = {\n",
+    "    buffer.getDouble(1)\n",
+    "  }\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "spark.udf.register(\"lastp\", new LastPrice)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val lastp = new LastPrice"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Test the aggregate"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Test the pivoted latest data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Define the prediction function"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def predict() = {\n",
+    "  val data = sampleDataset.groupBy(\"pair\")\n",
+    "             .agg(lastp($\"timestamp\",$\"price\") as \"price\", max($\"timestamp\") as \"timestamp\")\n",
+    "             .withColumn(\"ts\", lit(1L))\n",
+    "             .groupBy(\"ts\")\n",
+    "             .pivot(\"pair\")\n",
+    "             .agg(min($\"price\"))\n",
+    "  model.transform(data)\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "predict().select(\"ETHUSD\",\"prediction\").first"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "predict().select(\"ETHUSD\",\"prediction\").first"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Scala",
+   "language": "scala",
+   "name": "scala"
+  },
+  "language_info": {
+   "codemirror_mode": "text/x-scala",
+   "file_extension": ".scala",
+   "mimetype": "text/x-scala",
+   "name": "scala",
+   "nbconvert_exporter": "script",
+   "version": "2.12.9"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}

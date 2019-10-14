@@ -1,0 +1,170 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "//// import dependencies...\n",
+    "\n",
+    "/*\n",
+    "\"io.circe %% circe-core % 0.10.1\",\n",
+    "    \"io.circe %% circe-generic % 0.10.1\",\n",
+    "    \"io.circe %% circe-parser % 0.10.1\",\n",
+    "    \"io.github.azhur %% kafka-serde-circe % 0.4.0\",\n",
+    "    \"com.typesafe.akka %% akka-stream-kafka % 1.0.3\"\n",
+    "    */\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val dataFile = System.getenv(\"HOME\") + \"/data/stream/crypto-stream.json\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import akka.actor.ActorSystem\n",
+    "import akka.actor.{Actor, Props}\n",
+    "import akka.pattern.ask\n",
+    "import akka.util.ByteString\n",
+    "import akka.util.Timeout\n",
+    "import akka.stream.ActorMaterializer\n",
+    "import akka.stream.scaladsl._\n",
+    "import java.nio.file.Paths\n",
+    "import java.util.Properties\n",
+    "\n",
+    "import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}\n",
+    "import org.apache.kafka.common.serialization.StringSerializer\n",
+    "import akka.kafka.ProducerSettings\n",
+    "\n",
+    "import scala.concurrent.duration._\n",
+    "\n",
+    "implicit val system = ActorSystem(\"system\")\n",
+    "implicit val materializer = ActorMaterializer()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import _root_.io.circe.parser.decode\n",
+    "import _root_.io.circe.{ Decoder, Encoder }\n",
+    "\n",
+    "case class Tick(exchange: String, pair: String, timestamp: Long, price: Double, volume: Double)\n",
+    "\n",
+    "object Tick {\n",
+    "  import _root_.io.circe.generic.semiauto._\n",
+    "\n",
+    "  implicit lazy val encoder: Encoder[Tick] = deriveEncoder[Tick]\n",
+    "  implicit lazy val decoder: Decoder[Tick] = deriveDecoder[Tick]\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import scala.concurrent.duration._\n",
+    "import scala.language.postfixOps\n",
+    "\n",
+    "class MsgDelayer extends Actor {\n",
+    "  import context._\n",
+    "  var time = -1L\n",
+    "  def receive = {\n",
+    "    case tick: Tick if (time < 0 ) => {\n",
+    "      time = tick.timestamp\n",
+    "      context.system.scheduler.scheduleOnce(0 milliseconds, sender, tick)\n",
+    "    }\n",
+    "    case tick: Tick => {\n",
+    "      val delay = tick.timestamp - time\n",
+    "      time = tick.timestamp\n",
+    "      context.system.scheduler.scheduleOnce(delay second, sender, tick)\n",
+    "    } \n",
+    "  }\n",
+    "}\n",
+    "object MsgDelayer{\n",
+    "  def props() = Props(new MsgDelayer())\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val delayer = system.actorOf(MsgDelayer.props())\n",
+    "implicit val askTimeout = Timeout(500.seconds)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val props = new Properties()\n",
+    "  props.put(\"bootstrap.servers\", \"192.168.58.111:9092\")\n",
+    "  props.put(\"client.id\", \"ScalaProducerExample\")\n",
+    "  props.put(\"key.serializer\", \"org.apache.kafka.common.serialization.StringSerializer\")\n",
+    "  props.put(\"value.serializer\", \"org.apache.kafka.common.serialization.StringSerializer\")\n",
+    "\n",
+    "val producer = new KafkaProducer[String, String](props)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FileIO.fromPath(Paths.get(dataFile))\n",
+    "      .via(Framing.delimiter(ByteString(\"\\n\"), 256, true).map(_.utf8String))\n",
+    "      .map(s => (decode[Tick](s)).right.toOption.get)\n",
+    "      .filter(_.exchange == \"Kraken\")\n",
+    "      .mapAsync(1)(tick => (delayer ? tick).mapTo[Tick])\n",
+    "      .map(tick => Tick.encoder(tick).noSpaces)\n",
+    "      .map(value => new ProducerRecord[String, String](\"test\", value))\n",
+    "      .map(msg => producer.send(msg))\n",
+    "      .runWith(Sink.ignore)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Scala",
+   "language": "scala",
+   "name": "scala"
+  },
+  "language_info": {
+   "codemirror_mode": "text/x-scala",
+   "file_extension": ".scala",
+   "mimetype": "text/x-scala",
+   "name": "scala",
+   "nbconvert_exporter": "script",
+   "version": "2.12.9"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}

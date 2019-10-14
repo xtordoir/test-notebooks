@@ -1,0 +1,474 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Raw data preprocessing notebook"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Activate Spark for this Almond Session"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import $ivy.`org.apache.spark::spark-sql:2.4.0`"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Use a logger to avoid polluting cells outputs with long log messages"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import org.apache.log4j.{Level, Logger}\n",
+    "Logger.getLogger(\"org\").setLevel(Level.OFF)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Create the SparkSession\n",
+    "\n",
+    "Note the master settings, here only using local cores."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import org.apache.spark.sql._\n",
+    "\n",
+    "val sparkSession = {\n",
+    "  NotebookSparkSession.builder()\n",
+    "    .master(\"local[*]\")\n",
+    "    .getOrCreate()\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Create a variable storing data directory\n",
+    "\n",
+    "Create a variable alias for the SparkSession\n",
+    "\n",
+    "Import some implicits needed to name columns using the `$` prefix function"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val dataDir = System.getenv(\"HOME\") + \"/data/history\"\n",
+    "val spark   = sparkSession"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import spark.implicits._"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Exercise:\n",
+    "\n",
+    "System call to look at the file content like `head <file>`\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Read csv file to Dataframe\n",
+    "\n",
+    "* No header\n",
+    "* Infer a schema\n",
+    "* name columns"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val rawDF = spark.read.format(\"csv\")\n",
+    "        .option(\"header\", \"false\")\n",
+    "        .option(\"inferSchema\", \"true\")\n",
+    "        .load(s\"${dataDir}/*.csv\")\n",
+    "        .toDF(\"instrument\",\"timestamp\",\"open\",\"high\",\"low\",\"close\",\"volume\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "##### Count the number of records"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rawDF.count"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Find distinct instruments"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rawDF.select(\"instrument\").distinct"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Count number of distinct timestamps\n",
+    "Use the count aggregate function\n",
+    "Columns are identified with one of:\n",
+    "\n",
+    "col(\"<column name>\")\n",
+    "\n",
+    "$\"<column name>\"\n",
+    "\n",
+    "\"<column name>\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "// ..."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Count number of timestamp for each instrument\n",
+    "\n",
+    "Group by instrument, then count"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "// ..."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Count number of occurences of each timestamp"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rawDF.groupBy(\"timestamp\").count\n",
+    "     .toDF(\"ts\", \"ts_count\")\n",
+    "     .groupBy(\"ts_count\").count\n",
+    "     .orderBy($\"ts_count\".asc)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Use of SQL queries\n",
+    "\n",
+    "- Create a `table` to associate a DataFrame with a table name, e.g:\n",
+    "\n",
+    "```\n",
+    "df.createOrReplaceTempView(\"people\")\n",
+    "```\n",
+    "\n",
+    "- Run sql queries, e.g:\n",
+    "\n",
+    "```\n",
+    "spark.sql(\"SELECT count(*) FROM people\")\n",
+    "```\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Data cleaning: only keep timestamps with the 5 instruments\n",
+    "\n",
+    "These counts teach us there are occurences of `timestamps` with duplicate or missing `instruments`\n",
+    "\n",
+    "We need to remove any duplicate line then identify timestamps with the 5 instruments\n",
+    "\n",
+    "TODO: Write the SQL equivalent..."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "(rawDF.count, rawDF.distinct.count)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rawDF.distinct\n",
+    "     .groupBy(\"timestamp\").agg(collect_list($\"instrument\"))\n",
+    "     .toDF(\"ts\", \"instruments\")\n",
+    "     .count"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rawDF.distinct\n",
+    "     .groupBy(\"timestamp\").agg(collect_list($\"instrument\"))\n",
+    "     .toDF(\"ts\", \"instruments\")\n",
+    "     .filter(\"size(instruments) != 5\")\n",
+    "     .count"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val timestamps = rawDF.distinct\n",
+    "     .groupBy(\"timestamp\").agg(collect_list($\"instrument\"))\n",
+    "     .toDF(\"ts\", \"instruments\")\n",
+    "     .filter(\"size(instruments) == 5\")\n",
+    "     .select(\"ts\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "There are 10067 `timestamps` to keep to get only complete data"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Inner join `timestamps` to filter data\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val filtered = rawDF.distinct\n",
+    "                    .join(timestamps, $\"timestamp\" === $\"ts\")\n",
+    "                    .select(\"timestamp\", \"instrument\", \"close\")\n",
+    "//.count"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "50385/5"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "filtered.distinct.count\n",
+    "     //.groupBy(\"timestamp\").agg(collect_list($\"instrument\"))\n",
+    "     //.toDF(\"ts\", \"instruments\")\n",
+    "     //.count"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "50335/5"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Pivot the table to get instruments as colums\n",
+    "\n",
+    "* Aggregate by timestamp to define the rows keys\n",
+    "* Pivot around instruments to define columns\n",
+    "* Keep the min (or max or avg -- only one element is used anyway thanks to previous filtering)\n",
+    "* Order by timestamp"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val data = filtered.groupBy($\"timestamp\")   \n",
+    "                   .pivot($\"instrument\")\n",
+    "                   .agg(min(\"close\"))\n",
+    "                   .orderBy($\"timestamp\".desc)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Save as parquet file\n",
+    "\n",
+    "See partitions on disk"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "// TODO ... toon many partitions ..."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val dataLocation = System.getenv(\"HOME\") + \"/data/cleaned-history.parquet\"\n",
+    "data.write.save(dataLocation)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "##### TODO:\n",
+    "\n",
+    "`ls -l $dataLocation`\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Scala",
+   "language": "scala",
+   "name": "scala"
+  },
+  "language_info": {
+   "codemirror_mode": "text/x-scala",
+   "file_extension": ".scala",
+   "mimetype": "text/x-scala",
+   "name": "scala",
+   "nbconvert_exporter": "script",
+   "version": "2.12.9"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}

@@ -1,0 +1,202 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Train Linear Model"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import $ivy.`org.apache.spark::spark-sql:2.4.0`"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import org.apache.log4j.{Level, Logger}\n",
+    "Logger.getLogger(\"org\").setLevel(Level.OFF)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import org.apache.spark.sql._\n",
+    "\n",
+    "val sparkSession = {\n",
+    "  NotebookSparkSession.builder()\n",
+    "    .master(\"local[*]\")\n",
+    "    .getOrCreate()\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Read cleaned dataset for training"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val dataDir = System.getenv(\"HOME\") + \"/data\"\n",
+    "val dataLocation = s\"$dataDir/cleaned-history.parquet\"\n",
+    "val spark   = sparkSession"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val data = spark.read.load(dataLocation)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Assembler to gather features from selected columns"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import org.apache.spark.ml.regression.LinearRegression\n",
+    "import org.apache.spark.ml.feature.VectorAssembler\n",
+    "import org.apache.spark.ml.{Pipeline, PipelineModel}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val assembler = new VectorAssembler()\n",
+    "                 .setInputCols(Array(\"BTCUSD\", \"XRPUSD\"))\n",
+    "                 .setOutputCol(\"features\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Linear Model definition with Label column"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val lr = new LinearRegression()\n",
+    "  .setLabelCol(\"ETHUSD\")\n",
+    "  .setMaxIter(10)\n",
+    "  .setRegParam(0.001)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Pipeline with 2 stages: Featurers assembler and Linear Regression"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val pipeline = new Pipeline()\n",
+    "  .setStages(Array(assembler, lr))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Train the model and plot Prediction vs Actual"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "val model = pipeline.fit(data)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ScatterChart(model.transform(data).select(\"ETHUSD\",\"prediction\").collect)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Save model on disk"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "model.write.overwrite().save(s\"$dataDir/spark-linear-model\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Scala",
+   "language": "scala",
+   "name": "scala"
+  },
+  "language_info": {
+   "codemirror_mode": "text/x-scala",
+   "file_extension": ".scala",
+   "mimetype": "text/x-scala",
+   "name": "scala",
+   "nbconvert_exporter": "script",
+   "version": "2.12.9"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
